@@ -9,6 +9,19 @@ import numpy as np
 import pandas as pd
 import requests
 
+def download_model(url, filename):
+    import os, requests
+
+    os.makedirs("models", exist_ok=True)
+    path = os.path.join("models", filename)
+
+    if not os.path.exists(path):
+        print(f"Downloading {filename}...")
+        r = requests.get(url)
+        with open(path, "wb") as f:
+            f.write(r.content)
+
+    return path
 
 def load_model_auto(primary_live, fallback):
     try:
@@ -21,13 +34,24 @@ def load_model_auto(primary_live, fallback):
         return model
 
 
-# 1) LOAD MODELS (live models preferred)
-aqi_model = load_model_auto("aqi_model_live.pkl", "aqi_model_1.pkl")
-caci_model = load_model_auto("caci_model_live.pkl", "caci_model_1.pkl")
-pm25_model = load_model_auto("pm25_model_live.pkl", "pm25_model.pkl")
-temp_model = load_model_auto("temp_model_live.pkl", "temp_model.pkl")
-humidity_model = load_model_auto("humidity_model_live.pkl", "humidity_model.pkl")
+# # 1) LOAD MODELS (live models preferred)
+# aqi_model = load_model_auto("aqi_model_live.pkl", "aqi_model_1.pkl")
+# caci_model = load_model_auto("caci_model_live.pkl", "caci_model_1.pkl")
+# pm25_model = load_model_auto("pm25_model_live.pkl", "pm25_model.pkl")
+# temp_model = load_model_auto("temp_model_live.pkl", "temp_model.pkl")
+# humidity_model = load_model_auto("humidity_model_live.pkl", "humidity_model.pkl")
 
+AQI_URL = "https://drive.google.com/uc?export=download&id=1UKueg89Udbs0ckJGtqyokQKowxUfsWCc"
+CACI_URL = "https://drive.google.com/uc?export=download&id=1dLKcHoSG2zgZ9fQjXi2tnOmUOnx4WBwv"
+PM25_URL = "https://drive.google.com/uc?export=download&id=1dXErmzkHx_pyO_J85tcaLy7lToGrLBd3"
+TEMP_URL = "https://drive.google.com/uc?export=download&id=1GhPG2HzBgrNu4HiP0GJHJwhYgQYAIH3A"
+HUMIDITY_URL = "https://drive.google.com/uc?export=download&id=1bUoPT1O1v8TbpcOq9TlaxDUSHRGeP__I"
+
+aqi_model = joblib.load(download_model(AQI_URL, "aqi_model_1.pkl"))
+caci_model = joblib.load(download_model(CACI_URL, "caci_model_1.pkl"))
+pm25_model = joblib.load(download_model(PM25_URL, "pm25_model.pkl"))
+temp_model = joblib.load(download_model(TEMP_URL, "temp_model.pkl"))
+humidity_model = joblib.load(download_model(HUMIDITY_URL, "humidity_model.pkl"))
 
 def _model_features(model):
     names = getattr(model, "feature_names_in_", None)
