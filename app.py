@@ -1,5 +1,5 @@
 from flask import Flask, jsonify
-from model_script import run_prediction_once_now
+from model_script_new import run_prediction_once_now
 
 app = Flask(__name__)
 
