@@ -1,12 +1,13 @@
 import json
-import requests
-import numpy as np
-import pandas as pd
-import joblib
 import time
 from pathlib import Path
 from collections import deque
 from datetime import datetime, timedelta
+
+import joblib
+import numpy as np
+import pandas as pd
+import requests
 
 
 def load_model_auto(primary_live, fallback):
@@ -26,6 +27,33 @@ caci_model = load_model_auto("caci_model_live.pkl", "caci_model_1.pkl")
 pm25_model = load_model_auto("pm25_model_live.pkl", "pm25_model.pkl")
 temp_model = load_model_auto("temp_model_live.pkl", "temp_model.pkl")
 humidity_model = load_model_auto("humidity_model_live.pkl", "humidity_model.pkl")
+
+
+def _model_features(model):
+    names = getattr(model, "feature_names_in_", None)
+    if names is None:
+        raise ValueError("Loaded model has no feature_names_in_")
+    return list(names)
+
+
+AQI_FEATURES = _model_features(aqi_model)
+CACI_FEATURES = _model_features(caci_model)
+PM25_FEATURES = _model_features(pm25_model)
+TEMP_FEATURES = _model_features(temp_model)
+HUMIDITY_FEATURES = _model_features(humidity_model)
+
+ALL_MODEL_FEATURES = set().union(
+    AQI_FEATURES, CACI_FEATURES, PM25_FEATURES, TEMP_FEATURES, HUMIDITY_FEATURES
+)
+
+NEED_TARGET_LAGS = any(
+    f in ALL_MODEL_FEATURES for f in ["AQI_lag1", "AQI_lag2", "CACI_lag1", "CACI_lag2"]
+)
+
+if NEED_TARGET_LAGS:
+    print("Legacy feature mode: AQI/CACI lag state required")
+else:
+    print("Deployment-safe feature mode: no AQI/CACI lag dependency")
 
 # 2) THINGSPEAK CONFIG
 CHANNEL_ID = "3220962"
@@ -55,13 +83,6 @@ SOURCE_MAP = {
     "field4": "PM10",
     "field7": "gasValue",
 }
-
-REQUIRED_FEATURES = list(aqi_model.feature_names_in_)
-NEED_TARGET_LAGS = any(f in REQUIRED_FEATURES for f in ["AQI_lag1", "AQI_lag2", "CACI_lag1", "CACI_lag2"])
-if NEED_TARGET_LAGS:
-    print("Legacy feature mode: AQI/CACI lag state required")
-else:
-    print("Deployment-safe feature mode: no AQI/CACI lag dependency")
 
 http = requests.Session()
 http.headers.update({"User-Agent": "air-quality-predictor/1.0"})
@@ -107,7 +128,6 @@ def summarize_window(df, end_ts, minutes):
     if len(window_df) < MIN_POINTS_PER_WINDOW:
         return None
 
-    # Robust stats for noisy IoT streams
     snapshot = {}
     for col in ["TEMP", "humidity", "PM2.5", "PM10", "gasValue"]:
         low = window_df[col].quantile(0.05)
@@ -122,21 +142,16 @@ def summarize_window(df, end_ts, minutes):
 def build_hourly_context(df):
     latest_ts = df["timestamp"].iloc[-1]
 
-    # Current context: last 60 minutes
     cur = summarize_window(df, latest_ts, HORIZON_WINDOW_MIN)
     if cur is None:
-        # Bootstrap from all available recent data when channel is still warming up
         if len(df) < MIN_POINTS_PER_WINDOW:
             raise ValueError("Not enough samples yet. Wait for more sensor pushes.")
         cur = summarize_window(df, latest_ts, 24 * 60)
         print("Bootstrap mode: using available history for current window")
 
-    # Lag-1 context: previous 60 minutes
     lag1 = summarize_window(df, latest_ts - timedelta(minutes=HORIZON_WINDOW_MIN), HORIZON_WINDOW_MIN)
-    # Lag-2 context: 120-180 minutes back
     lag2 = summarize_window(df, latest_ts - timedelta(minutes=2 * HORIZON_WINDOW_MIN), HORIZON_WINDOW_MIN)
 
-    # Cold-start fallback: mirror nearest available context until enough history exists
     if lag1 is None:
         lag1 = dict(cur)
         print("Bootstrap mode: lag1 window unavailable, reusing current window")
@@ -144,7 +159,6 @@ def build_hourly_context(df):
         lag2 = dict(lag1)
         print("Bootstrap mode: lag2 window unavailable, reusing lag1 window")
 
-    # Light physical guardrails (helps domain shift robustness)
     cur["TEMP"] = float(np.clip(cur["TEMP"], -5, 50))
     cur["humidity"] = float(np.clip(cur["humidity"], 0, 100))
     for key in ["PM2.5", "PM10", "gasValue"]:
@@ -153,13 +167,33 @@ def build_hourly_context(df):
     return cur, lag1, lag2
 
 
-def build_feature_row(cur, lag1, lag2, state):
+def build_feature_row(df, cur, lag1, lag2, state):
     ts = cur["timestamp"]
     hour = ts.hour
     weekday = ts.weekday()
     day = ts.day
 
+    def _lag(col, steps):
+        if len(df) > steps:
+            return float(df[col].iloc[-1 - steps])
+        return float(df[col].iloc[0])
+
+    def _std(col, w):
+        s = df[col].tail(max(1, w))
+        return float(s.std(ddof=0)) if len(s) > 1 else 0.0
+
+    def _q(col, w, q):
+        return float(df[col].tail(max(1, w)).quantile(q))
+
+    def _ema(col, span):
+        return float(df[col].ewm(span=span, adjust=False).mean().iloc[-1])
+
+    def _roc(col, minutes):
+        steps = max(1, int(round(minutes / 2)))  # ~2-min sample interval
+        return float(cur[col] - _lag(col, steps))
+
     row = {
+        # base
         "PM2.5": cur["PM2.5"],
         "PM10": cur["PM10"],
         "gasValue": cur["gasValue"],
@@ -176,6 +210,34 @@ def build_feature_row(cur, lag1, lag2, state):
         "weekday_sin": np.sin(2 * np.pi * weekday / 7),
         "weekday_cos": np.cos(2 * np.pi * weekday / 7),
         "day": day,
+        # engineered
+        "PM2.5_lag_w7": _lag("PM2.5", 7),
+        "PM2.5_std_w7": _std("PM2.5", 7),
+        "PM2.5_lag_w15": _lag("PM2.5", 15),
+        "PM2.5_std_w15": _std("PM2.5", 15),
+        "PM2.5_lag_w22": _lag("PM2.5", 22),
+        "PM2.5_std_w22": _std("PM2.5", 22),
+        "PM2.5_lag_w30": _lag("PM2.5", 30),
+        "PM2.5_std_w30": _std("PM2.5", 30),
+        "PM2.5_roc_5min": _roc("PM2.5", 5),
+        "PM2.5_roc_10min": _roc("PM2.5", 10),
+        "PM2.5_roc_20min": _roc("PM2.5", 20),
+        "PM2.5_ema_7": _ema("PM2.5", 7),
+        "PM2.5_ema_15": _ema("PM2.5", 15),
+        "PM2.5_pct25_20min": _q("PM2.5", 10, 0.25),
+        "PM2.5_pct75_20min": _q("PM2.5", 10, 0.75),
+        "PM2.5_iqr_20min": _q("PM2.5", 10, 0.75) - _q("PM2.5", 10, 0.25),
+        "pm_temp": cur["PM2.5"] * cur["TEMP"],
+        "pm_temp_sq": (cur["PM2.5"] * cur["TEMP"]) ** 2,
+        "pm_humidity": cur["PM2.5"] * cur["humidity"],
+        "pm_humidity_sq": (cur["PM2.5"] * cur["humidity"]) ** 2,
+        "pm_gasValue": cur["PM2.5"] * cur["gasValue"],
+        "PM10_lag_w7": _lag("PM10", 7),
+        "gasValue_lag_w7": _lag("gasValue", 7),
+        "PM10_lag_w15": _lag("PM10", 15),
+        "gasValue_lag_w15": _lag("gasValue", 15),
+        "PM10_lag_w30": _lag("PM10", 30),
+        "gasValue_lag_w30": _lag("gasValue", 30),
     }
 
     if NEED_TARGET_LAGS:
@@ -188,8 +250,14 @@ def build_feature_row(cur, lag1, lag2, state):
         row["CACI_lag1"] = caci_lag1
         row["CACI_lag2"] = caci_lag2
 
-    X_live = pd.DataFrame([row])[REQUIRED_FEATURES]
-    return X_live
+    return row
+
+
+def frame_for_features(row, features):
+    missing = [f for f in features if f not in row]
+    if missing:
+        raise ValueError(f"Missing required features: {missing}")
+    return pd.DataFrame([{f: row[f] for f in features}])
 
 
 def post_predictions(aqi, caci, pm25_next, temp_next, humidity_next):
@@ -293,13 +361,19 @@ def warm_start_lags_from_prediction_channel(state):
 def predict_once(state):
     df_live = fetch_sensor_frame()
     cur, lag1, lag2 = build_hourly_context(df_live)
-    X_live = build_feature_row(cur, lag1, lag2, state)
+    feature_row = build_feature_row(df_live, cur, lag1, lag2, state)
 
-    pm25_next = pm25_model.predict(X_live)[0]
-    temp_next = temp_model.predict(X_live)[0]
-    humidity_next = humidity_model.predict(X_live)[0]
-    aqi_next = aqi_model.predict(X_live)[0]
-    caci_next = caci_model.predict(X_live)[0]
+    X_pm25 = frame_for_features(feature_row, PM25_FEATURES)
+    X_temp = frame_for_features(feature_row, TEMP_FEATURES)
+    X_humidity = frame_for_features(feature_row, HUMIDITY_FEATURES)
+    X_aqi = frame_for_features(feature_row, AQI_FEATURES)
+    X_caci = frame_for_features(feature_row, CACI_FEATURES)
+
+    pm25_next = pm25_model.predict(X_pm25)[0]
+    temp_next = temp_model.predict(X_temp)[0]
+    humidity_next = humidity_model.predict(X_humidity)[0]
+    aqi_next = aqi_model.predict(X_aqi)[0]
+    caci_next = caci_model.predict(X_caci)[0]
 
     if NEED_TARGET_LAGS:
         prev_aqi = state["aqi_lag"][0] if state["aqi_lag"][0] is not None else float(aqi_next)
@@ -368,11 +442,9 @@ def run_prediction_service():
             predict_once(state)
         except Exception as e:
             print(f"Prediction loop error: {e}")
-
         sleep_until_next_quarter()
 
 
-# One-shot test: immediate fetch -> predict -> post once
 def run_prediction_once_now():
     state = {
         "sensor_history": deque(maxlen=3),
@@ -384,8 +456,8 @@ def run_prediction_once_now():
         warm_start_lags_from_prediction_channel(state)
     predict_once(state)
 
-run_prediction_service()
 
 # Manual start options:
-# 1) run_prediction_once_now()     # quick smoke test (recommended first)
+# 1) run_prediction_once_now()     # quick smoke test
 # 2) run_prediction_service()      # continuous 15-minute loop
+run_prediction_service()
