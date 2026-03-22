@@ -3,7 +3,7 @@ aiohttp==3.13.3
 aiosignal==1.4.0
 annotated-types==0.7.0
 anyio==4.12.1
-apturl==0.5.2
+# apturl==0.5.2
 asgiref==3.11.0
 async-timeout==5.0.1
 attrs==25.4.0
