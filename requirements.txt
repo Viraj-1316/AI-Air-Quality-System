@@ -3,18 +3,18 @@
 # aiosignal==1.4.0
 # annotated-types==0.7.0
 # anyio==4.12.1
-# # apturl==0.5.2.
+# apturl==0.5.2
 # asgiref==3.11.0
 # async-timeout==5.0.1
 # attrs==25.4.0
 # bcrypt==3.2.0
-# blinker==1.4
+# blinker==1.9.0
 # Brlapi==0.8.3
 # certifi==2020.6.20
 # cffi==2.0.0
 # chardet==4.0.0
 # charset-normalizer==3.4.4
-# click==8.0.3
+# click==8.3.1
 # colorama==0.4.4
 # command-not-found==0.3
 # cryptography==46.0.5
@@ -30,6 +30,7 @@
 # exceptiongroup==1.3.1
 # fasteners==0.14.1
 # filelock==3.20.1
+# Flask==3.1.3
 # frozenlist==1.8.0
 # future==0.18.2
 # GDAL==3.4.1
@@ -42,7 +43,9 @@
 # httpx==0.28.1
 # idna==3.3
 # importlib-metadata==4.6.4
+# itsdangerous==2.2.0
 # jeepney==0.7.1
+# Jinja2==3.1.6
 # kagglehub==1.0.0
 # kagglesdk==0.1.15
 # keyring==23.5.0
@@ -54,12 +57,13 @@
 # louis==3.20.0
 # macaroonbakery==1.3.1
 # Mako==1.1.3
-# MarkupSafe==2.0.1
+# MarkupSafe==3.0.3
 # monotonic==1.6
 # more-itertools==8.10.0
 # multidict==6.7.1
 # netifaces==0.11.0
 # numpy==2.2.6
+# nvidia-nccl-cu12==2.29.7
 # oauthlib==3.2.0
 # olefile==0.46
 # openpyxl==3.1.5
@@ -95,6 +99,7 @@
 # reportlab==3.6.8
 # requests==2.32.5
 # rsa==4.9.1
+# scipy==1.15.3
 # SecretStorage==3.3.1
 # six==1.16.0
 # sniffio==1.3.1
@@ -115,15 +120,19 @@
 # virtualenv==20.35.4
 # wadllib==1.3.6
 # websockets==15.0.1
+# Werkzeug==3.1.6
 # xdg==5
+# xgboost==3.2.0
 # xkit==0.0.0
 # yarl==1.22.0
 # zipp==1.0.0
+
 flask
 gunicorn
 numpy
 pandas
 scikit-learn
 joblib
-firebase-admin
 requests
+xgboost
+
