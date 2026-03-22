@@ -134,5 +134,5 @@ pandas
 scikit-learn
 joblib
 requests
-xgboost
+xgboost==1.7.6
 
