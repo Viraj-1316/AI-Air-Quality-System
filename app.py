@@ -371,16 +371,17 @@ def merge_for_graph(actual_df, pred_df):
     actual_df = actual_df.sort_values("created_at")
     pred_df = pred_df.sort_values("created_at")
 
+    # 🔥 SHIFT prediction by +1 hour
+    pred_df["created_at"] = pred_df["created_at"] + pd.Timedelta(hours=1)
+
+    # ✅ CORRECT ALIGNMENT
     df = pd.merge_asof(
         actual_df,
         pred_df,
         on="created_at",
-        direction="backward",
-        tolerance=pd.Timedelta("20min")
+        direction="nearest",
+        tolerance=pd.Timedelta("10min")
     )
-
-    pred_cols = ["AQI_pred","CACI_pred","PM2.5_pred","TEMP_pred","HUMIDITY_pred"]
-    df[pred_cols] = df[pred_cols].ffill()
 
     return df
 
@@ -433,9 +434,17 @@ if actual_df.empty or pred_df.empty:
     st.stop()
 
 # 🔥 IMPORTANT: latest values separately
+pred_df_shifted = pred_df.copy()
+pred_df_shifted["created_at"] += pd.Timedelta(hours=1)
+
 latest_actual = actual_df.iloc[-1]
-latest_pred = pred_df.iloc[-1]
-latest_time = max(actual_df["created_at"].iloc[-1], pred_df["created_at"].iloc[-1])
+
+latest_pred_row = pred_df_shifted.iloc[
+    (pred_df_shifted["created_at"] - latest_actual["created_at"]).abs().argsort()[:1]
+]
+
+latest_pred = latest_pred_row.iloc[0] if not latest_pred_row.empty else None
+latest_time = latest_actual["created_at"]
 last_updated = format_timestamp(latest_time)
 age_minutes = format_age_minutes(latest_time)
 
@@ -523,10 +532,14 @@ st.plotly_chart(plot_graph(df, "HUMIDITY", "HUMIDITY_pred", "Humidity"))
 # ---------------- ERROR ----------------
 section_header("Prediction Error", "Absolute error for the quality indices.")
 
+df = df.dropna(subset=["AQI_actual", "AQI_pred", "CACI_actual", "CACI_pred"])
+
 df["AQI_error"] = abs(df["AQI_actual"] - df["AQI_pred"])
 df["CACI_error"] = abs(df["CACI_actual"] - df["CACI_pred"])
-
-st.line_chart(df[["AQI_error", "CACI_error"]])
+df["PM2.5_error"] = abs(df["PM2.5"] - df["PM2.5_pred"])
+df["TEMP_error"] = abs(df["TEMP"] - df["TEMP_pred"])
+df["HUMIDITY_error"] = abs(df["HUMIDITY"] - df["HUMIDITY_pred"])
+st.line_chart(df[["AQI_error", "CACI_error", "PM2.5_error", "TEMP_error", "HUMIDITY_error"]])
 
 # ---------------- AUTO REFRESH ----------------
 time.sleep(REFRESH_INTERVAL)
