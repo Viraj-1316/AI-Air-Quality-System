@@ -328,11 +328,16 @@ def get_aqi_status(aqi):
     else: return "SEVERE"
 
 def get_caci_status(caci):
-    if pd.isna(caci): return "N/A"
-    if caci <= 25: return "OPTIMAL"
-    elif caci <= 50: return "GOOD"
-    elif caci <= 75: return "MODERATE"
-    else: return "WARNING"
+    if pd.isna(caci): 
+        return "N/A"
+    if caci >= 75: 
+        return "OPTIMAL"
+    elif caci >= 50: 
+        return "GOOD"
+    elif caci >= 25: 
+        return "MODERATE"
+    else: 
+        return "WARNING"
 
 def get_temp_status(temp):
     if pd.isna(temp): return "N/A"
